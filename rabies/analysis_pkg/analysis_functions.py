@@ -198,6 +198,8 @@ class NeuralPriorRecoveryInputSpec(BaseInterfaceInputSpec):
         desc="Whether to derive absolute or relative (variance-normalized) network maps.")
     figure_format = traits.Str(
         desc="Select file format for figures.")
+    CPCA_DR = traits.Bool(
+        desc="Whether to use dual regression to replace NPR stage 2.")
 
 class NeuralPriorRecoveryOutputSpec(TraitedSpec):
     NPR_prior_timecourse_csv = File(
@@ -226,7 +228,7 @@ class NeuralPriorRecovery(BaseInterface):
         import pandas as pd
         import pathlib  # Better path manipulation
         from rabies.utils import recover_4D
-        from rabies.analysis_pkg.analysis_math import spatiotemporal_prior_fit
+        from rabies.analysis_pkg.analysis_math import spatiotemporal_prior_fit,spatiotemporal_C_PCA_DR
 
         import pickle
         with open(self.inputs.dict_file, 'rb') as handle:
@@ -250,7 +252,7 @@ class NeuralPriorRecovery(BaseInterface):
                                         diff_thresh=optimize_NPR_dict['diff_thresh'],
                                         max_iter=optimize_NPR_dict['max_iter'], 
                                         compute_max=optimize_NPR_dict['compute_max'], 
-                                        gen_report=True)
+                                        gen_report=True, CPCA_DR=self.inputs.CPCA_DR)
             optimize_report_file = os.path.abspath(f'{filename_split[0]}_NPR_optimize.{self.inputs.figure_format}')
             optimize_report_fig.savefig(optimize_report_file, bbox_inches='tight')
         else:
@@ -260,7 +262,10 @@ class NeuralPriorRecovery(BaseInterface):
                 NPR_temporal_comp=0
             if NPR_spatial_comp<1: # make sure there is no negative number
                 NPR_spatial_comp=0
-            modeling = spatiotemporal_prior_fit(timeseries, C_prior, num_W=NPR_temporal_comp, num_C=NPR_spatial_comp)
+            if self.inputs.CPCA_DR:
+                modeling = spatiotemporal_C_PCA_DR(timeseries, C_prior, num_W=NPR_temporal_comp, num_C=NPR_spatial_comp)
+            else:
+                modeling = spatiotemporal_prior_fit(timeseries, C_prior, num_W=NPR_temporal_comp, num_C=NPR_spatial_comp)
             optimize_report_file=None
 
         # put together the spatial and temporal extra components
@@ -324,7 +329,7 @@ def eval_convergence(prior_corr_list,fit_diff_list,window_size=5,min_prior_corr=
     return None
 
 
-def spatiotemporal_fit_converge(X,C_prior,window_size=5,min_prior_corr=0.5,diff_thresh=0.03,max_iter=20, compute_max=False, gen_report=False):
+def spatiotemporal_fit_converge(X,C_prior,window_size=5,min_prior_corr=0.5,diff_thresh=0.03,max_iter=20, compute_max=False, gen_report=False, CPCA_DR=False):
     '''
     NPR is conducted while incrementally increasing the number of components (alternating 
     between a spatial and a temporal component). 
@@ -353,7 +358,7 @@ def spatiotemporal_fit_converge(X,C_prior,window_size=5,min_prior_corr=0.5,diff_
     max_iter: maximum number of components to derive
     '''
     
-    from rabies.analysis_pkg.analysis_math import spatiotemporal_prior_fit
+    from rabies.analysis_pkg.analysis_math import spatiotemporal_prior_fit,spatiotemporal_C_PCA_DR
 
     num_prior = C_prior.shape[1]
     num_list=range(0,max_iter)
@@ -370,7 +375,10 @@ def spatiotemporal_fit_converge(X,C_prior,window_size=5,min_prior_corr=0.5,diff_
         else:
             num_W = num_C
 
-        NPR_dict = spatiotemporal_prior_fit(X, C_prior, num_W=num_W, num_C=num_C)
+        if CPCA_DR:
+            NPR_dict = spatiotemporal_C_PCA_DR(X, C_prior, num_W=num_W, num_C=num_C)
+        else:
+            NPR_dict = spatiotemporal_prior_fit(X, C_prior, num_W=num_W, num_C=num_C)
         NPR_dict_list.append(NPR_dict)
         prior_corr_list.append(NPR_dict['corr_list'])
         C_fit = NPR_dict['C_fitted_prior']

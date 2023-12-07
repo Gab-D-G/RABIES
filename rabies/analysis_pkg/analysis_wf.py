@@ -125,7 +125,8 @@ def init_analysis_wf(opts, commonspace_cr=False, name="analysis_wf"):
                             optimize_NPR_dict=opts.optimize_NPR, 
                             prior_bold_idx = opts.prior_bold_idx,
                             network_weighting=opts.network_weighting,
-                            figure_format=opts.figure_format),
+                            figure_format=opts.figure_format,
+                            CPCA_DR=opts.CPCA_DR),
                             name='NPR_node', mem_gb=1*opts.scale_min_memory)
 
         workflow.connect([

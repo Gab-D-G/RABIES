@@ -200,28 +200,55 @@ def spatiotemporal_prior_fit(X, C_prior, num_W, num_C):
             'S_fitted_prior':S_fitted_prior, 'S_spatial':S_spatial, 'S_temporal':S_temporal, 
             'corr_list':corr_list}
 
-'''
 
-def closed_form_3d(X,Y):
-    return np.matmul(np.matmul(np.linalg.inv(np.matmul(X.transpose(0,2,1),X)),X.transpose(0,2,1)),Y)
+def spatiotemporal_C_PCA_DR(X, C_prior, num_W, num_C):
+    C_prior = C_prior.copy()
+    num_priors = C_prior.shape[1]
+    # first fit data-driven temporal components
+    W_extra,W_, C = dual_OLS_fit(X.T, q=num_W, c_init=None, C_prior=None, W_prior = C_prior, tol=1e-6, max_iter=200, verbose=1)
+    # second fit data-driven spatial components
+    C_extra,C_, W = dual_OLS_fit(X, q=num_C, c_init=None, C_prior=C_prior, W_prior = W_extra, tol=1e-6, max_iter=200, verbose=1)
+    Cw = C_[:,num_priors+num_C:] # the spatial part of W_extra
+    #Wc = W[:,:num_C] # the temporal part of C_extra
 
-def lme_stats_3d(X,Y):
-    #add an intercept
-    X=np.concatenate((X,np.ones((X.shape[0],X.shape[1],1))),axis=2)
-    [num_comparisons,num_observations,num_predictors] = X.shape
-    [num_comparisons,num_observations,num_features] = Y.shape
+    # estimate a final set for C and W, offering a final linear fit to X = WtC
+    C = np.concatenate((C_prior, C_extra, Cw), axis=1)
+    C /= np.sqrt((C ** 2).mean(axis=0)) # normalized prior to regression to that S1 is standardized
 
-    w=closed_form_3d(X,Y)
+    W = closed_form(C, X.T).T
+    if num_W>0:
+        W[:,-num_W:] = W_extra # add back W_prior
+        
+    S_pre = np.sqrt((W ** 2).mean(axis=0)) # store variance when using the prior as regressor
+    S_prior = S_pre[:num_priors]    
+    W /= S_pre # the temporal domain is variance-normalized so that the weights are contained in the spatial maps
+    C = closed_form(W, X).T
 
-    residuals = Y-np.matmul(X, w)
-    MSE = (((residuals)**2).sum(axis=1)/(num_observations-num_predictors))
+    S = np.sqrt((C ** 2).mean(axis=0)) # the component variance/scaling is taken from the spatial maps
+    C /= S # the spatial maps are variance normalized; the variance is stored in S
 
+    # Fitted priors are at the first indices
+    C_fitted_prior = C[:,:num_priors]
+    W_fitted_prior = W[:,:num_priors]
+    S_fitted_prior = S[:num_priors]    
+    
+    # temporal components are at the last indices
+    C_temporal = C[:,num_priors+num_C:]
+    W_temporal = W[:,num_priors+num_C:]
+    S_temporal = S[num_priors+num_C:]
 
-    var_b = np.expand_dims(MSE, axis=1)*np.expand_dims(np.linalg.inv(np.matmul(X.transpose(0,2,1),X)).diagonal(axis1=1,axis2=2), axis=2)
-    sd_b = np.sqrt(var_b) # standard error on the Betas
-    ts_b = w/sd_b # calculate t-values for the Betas
-    p_values =[2*(1-stats.t.cdf(np.abs(ts_b[:,i,:]),(num_observations-num_predictors))) for i in range(ts_b.shape[1])] # calculate a p-value map for each predictor
+    # spatial components are in the middle
+    C_spatial = C[:,num_priors:num_priors+num_C]
+    W_spatial = W[:,num_priors:num_priors+num_C]
+    S_spatial = S[num_priors:num_priors+num_C]
+    
+    corr_list=[]
+    for i in range(num_priors):
+        corr = np.corrcoef(C_fitted_prior[:,i].T, C_prior[:,i].T)[0,1]
+        corr_list.append(corr)
 
-    return ts_b,p_values,w,residuals
-
-'''
+    # we thus output a model of the timeseries of the form X = W.dot((S*C).T)
+    return {'C_fitted_prior':C_fitted_prior, 'C_spatial':C_spatial, 'C_temporal':C_temporal, 
+            'W_fitted_prior':W_fitted_prior, 'W_spatial':W_spatial, 'W_temporal':W_temporal, 
+            'S_fitted_prior':S_fitted_prior, 'S_spatial':S_spatial, 'S_temporal':S_temporal, 
+            'S_prior':S_prior, 'corr_list':corr_list}

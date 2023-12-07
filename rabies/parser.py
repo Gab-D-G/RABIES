@@ -971,6 +971,13 @@ def get_parser():
             "\n"
         )
     analysis.add_argument(
+        "--CPCA_DR", dest='CPCA_DR', action='store_true',
+        help=
+            "Conducts CPCA for denoising as with NPR stage 1, but then replace stage 2 NPR with a normal dual regression.\n"
+            "(default: %(default)s)\n"
+            "\n"
+        )
+    analysis.add_argument(
         '--optimize_NPR', type=str,
         default='apply=false,window_size=5,min_prior_corr=0.5,diff_thresh=0.03,max_iter=20,compute_max=false',
         help=
