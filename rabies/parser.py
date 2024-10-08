@@ -292,7 +292,17 @@ def get_parser():
             "(default: %(default)s)\n"
             "\n"
         )
-
+    preprocess.add_argument(
+        "--PEDir", dest='PEDir', action='store_true',
+        help=
+        "If you acquired your data with different phase encoding directions\n"
+        "the runs names will be identified as duplicates, in this case this flag will get rabies\n"
+        "to identify the runs as different runs and iterate over the pe\n"
+        "aka ....dir-AP....run-01--\n"
+        "    ....dir-PA....run-01--\n"
+        "(default: %(default)s)\n"
+        "\n"
+    )
     g_registration = preprocess.add_argument_group(
         title='Registration Options', 
         description=

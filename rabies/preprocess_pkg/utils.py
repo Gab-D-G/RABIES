@@ -112,6 +112,132 @@ def prep_bids_iter(layout, bids_filter, bold_only=False, inclusion_list=['all'],
     number_functional_scans = len(bold_scan_list)
     return split_name, scan_info, run_iter, structural_scan_list, number_functional_scans
 
+def prep_bids_iter_pe(layout, bids_filter, bold_only=False, inclusion_list=['all'], exclusion_list=['none']):
+    '''
+    This function same as prep_bids_iter, but takes into account the phase encoding direction.
+    '''
+    import pathlib
+
+    scan_info = []
+    split_name = []
+    structural_scan_list = []
+    pe_iter = {}
+    run_iter = {}
+    bold_scan_list = []
+
+    subject_list = layout.get_subject()
+    if len(subject_list) == 0:
+        raise ValueError(
+            "No subject information could be retrieved from the BIDS directory. The 'sub-' specification is mandatory.")
+
+    if not 'subject' in list(bids_filter['func'].keys()):
+        # enforce that only files with subject ID are read
+        bids_filter['func']['subject'] = subject_list
+
+    # create the list for all functional images; this is applying all filters from bids_filter
+    bold_bids = layout.get(extension=['nii', 'nii.gz'], **bids_filter['func'])
+    if len(bold_bids) == 0:
+        raise ValueError(
+            f"No functional file were found respecting the functional BIDS spec: {bids_filter['func']}")
+
+    # remove subject, session and run; these are used later to target single files
+    bids_filter['func'].pop('subject', None)
+    bids_filter['func'].pop('session', None)
+    bids_filter['func'].pop('pe', None)
+    bids_filter['func'].pop('run', None)
+
+    # filter inclusion/exclusion lists
+    from rabies.utils import filter_scan_inclusion, filter_scan_exclusion
+    boldname_list = [pathlib.Path(bold.filename).name.rsplit(".nii")[0] for bold in bold_bids]
+    updated_split_name = filter_scan_inclusion(inclusion_list, boldname_list)
+    updated_split_name = filter_scan_exclusion(exclusion_list, updated_split_name)
+
+    filtered_bold_bids = []
+    for name in updated_split_name:
+        for bold in bold_bids:
+            if name in bold.filename:
+                filtered_bold_bids.append(bold)
+    bold_bids = filtered_bold_bids
+
+    bold_dict = {}
+    for bold in bold_bids:
+        sub = bold.get_entities()['subject']
+        try:
+            ses = bold.get_entities()['session']
+        except:
+            ses = None
+
+        try:
+            pe = bold.get_entities()['direction']
+        except:
+            pe = None
+
+        try:
+            run = bold.get_entities()['run']
+        except:
+            run = None
+
+        if sub not in list(bold_dict.keys()):
+            bold_dict[sub] = {}
+        if ses not in list(bold_dict[sub].keys()):
+            bold_dict[sub][ses] = {}
+        if pe not in list(bold_dict[sub][ses].keys()):
+            bold_dict[sub][ses][pe] = {}
+        if run not in list(bold_dict[sub][ses][pe].keys()):
+            bold_dict[sub][ses][pe][run] = {}
+
+        bold_list = layout.get(subject=sub, session=ses, direction=pe, run=run,
+                               extension=['nii', 'nii.gz'], return_type='filename', **bids_filter['func'])
+        bold_dict[sub][ses][pe][run] = bold_list
+
+    # if not bold_only, then the bold_list and run_iter will be a dictionary with keys being the anat filename
+    # otherwise, it will be a list of bold scans themselves
+    for sub in list(bold_dict.keys()):
+        for ses in list(bold_dict[sub].keys()):
+            if not bold_only:
+                anat_list = layout.get(subject=sub, session=ses,
+                                       extension=['nii', 'nii.gz'], return_type='filename', **bids_filter['anat'])
+                if len(anat_list) == 0:
+                    raise ValueError(
+                        f'Missing an anatomical image for sub {sub} and ses- {ses}, and the following BIDS specs: {bids_filter["anat"]}')
+                if len(anat_list) > 1:
+                    raise ValueError(
+                        f'Duplicate was found for the anatomical file sub- {sub}, ses- {ses}: {str(anat_list)}')
+                file = anat_list[0]
+                structural_scan_list.append(file)
+                filename_template = pathlib.Path(file).name.rsplit(".nii")[0]
+                split_name.append(filename_template)
+                scan_info.append({'subject_id': sub, 'session': ses})
+                run_iter[filename_template] = []
+                pe_iter[filename_template] = []
+
+            for pe in list(bold_dict[sub][ses].keys()):
+                for run in list(bold_dict[sub][ses][pe].keys()):
+
+                    bold_list = bold_dict[sub][ses][pe][run]
+                    if len(bold_list) > 1:
+                        # check for duplicates using set method if the list is longer than 1, can't have duplicates if only 1
+                        # if len(bold_list) > 1 and len(bold_list) != len(set(bold_list)):
+                        raise ValueError(
+                            f'Duplicate was found for bold files sub- {sub}, ses- {ses}, dir- {pe} and run {run}: {str(bold_list)}')
+                    file = bold_list[0]
+                    bold_scan_list.append(file)
+                    if bold_only:
+                        structural_scan_list.append(file)
+                        filename_template = pathlib.Path(
+                            file).name.rsplit(".nii")[0]
+                        split_name.append(filename_template)
+                        scan_info.append(
+                            {'subject_id': sub, 'session': ses, 'direction': pe, 'run': run})
+                    else:
+                        if pe not in pe_iter[filename_template]:
+                            pe_iter[filename_template].append(pe)
+                        if run not in run_iter[filename_template]:
+                            run_iter[filename_template].append(run)
+
+
+    number_functional_scans = len(bold_scan_list)
+    return split_name, scan_info, run_iter, structural_scan_list, number_functional_scans, pe_iter
 
 class BIDSDataGraberInputSpec(BaseInterfaceInputSpec):
     bids_dir = traits.Str(exists=True, mandatory=True,
@@ -120,6 +246,7 @@ class BIDSDataGraberInputSpec(BaseInterfaceInputSpec):
                          desc="BIDS specs")
     scan_info = traits.Dict(exists=True, mandatory=True,
                             desc="Info required to find the scan")
+    pe = traits.Any(exists=True, desc="Phase encoding direction", mandatory=False, default=None, usedefault=True)
     run = traits.Any(exists=True, desc="Run number")
 
 
@@ -138,6 +265,11 @@ class BIDSDataGraber(BaseInterface):
     output_spec = BIDSDataGraberOutputSpec
 
     def _run_interface(self, runtime):
+        if 'direction' in (self.inputs.scan_info.keys()):
+            pe = self.inputs.scan_info['direction']
+        else:
+            pe = self.inputs.pe
+
         if 'run' in (self.inputs.scan_info.keys()):
             run = self.inputs.scan_info['run']
         else:
@@ -146,6 +278,9 @@ class BIDSDataGraber(BaseInterface):
         bids_filter = self.inputs.bids_filter.copy()
         bids_filter['subject'] = self.inputs.scan_info['subject_id']
         bids_filter['session'] = self.inputs.scan_info['session']
+        if not pe is None:
+            bids_filter['direction'] = pe
+
         if not run is None:
             bids_filter['run'] = run
 
