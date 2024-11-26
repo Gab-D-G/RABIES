@@ -30,7 +30,7 @@ REQUIRED = [
     'pandas==1.2.4',
     'pathos==0.2.7',
     'pybids==0.16.3',
-    'scikit-learn==0.24.1',
+    'scikit-learn==1.0.1',
     'scipy==1.8.1',
     'seaborn==0.11.1',
     'simpleitk==2.0.2',
